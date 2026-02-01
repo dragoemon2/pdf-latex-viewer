@@ -1,0 +1,73 @@
+/* ブラウザのデフォルト余白を消す */
+body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden; /* アプリっぽくするために、画面外へのスクロールも防ぐ */
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* 全体をFlexボックスにして、高さを画面いっぱいにする */
+.app-layout {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}
+
+/* 左サイドバー */
+.sidebar-container {
+  width: 280px; /* サイドバーの幅 */
+  flex-shrink: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* 右メインコンテンツ */
+.main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ツールバー */
+.toolbar {
+  padding: 10px;
+  background: #eee;
+  display: flex;
+  gap: 10px;
+  border-bottom: 1px solid #ccc;
+}
+
+/* PDF表示エリア (スクロール可能領域) */
+.pdf-scroll-container {
+  flex: 1;
+  overflow: auto; /* ここでスクロールさせる */
+  padding: 20px;
+  background-color: #f0f0f0;
+  display: flex;
+  justify-content: center;
+}
+
+/* react-pdf の Outline 用スタイル調整 */
+.custom-outline ul {
+  list-style: none;
+  padding-left: 15px;
+}
+.custom-outline li {
+  margin-bottom: 5px;
+}
+.custom-outline a {
+  text-decoration: none;
+  color: #333;
+  font-size: 14px;
+}
+.custom-outline a:hover {
+  text-decoration: underline;
+  color: #007bff;
+}
+
