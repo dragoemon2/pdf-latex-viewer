@@ -28,7 +28,7 @@ interface Annotation {
   y: number;
   content: string;
   isNew?: boolean;
-  fontSize?: number; // 👈 追加
+  fontSize?: number; 
 }
 
 interface ContextMenuState {
@@ -582,6 +582,7 @@ function App() {
           onResultClick={(res) => handleJumpToPage(res.page)}
           activeTab={sidebarTab}           // 今のタブを渡す
           onTabChange={setSidebarTab}
+          pdfDocument={pdfDocument}
         />
       </div>
 
