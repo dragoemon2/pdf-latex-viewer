@@ -9,7 +9,7 @@ import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 import "./App.css";
-import Sidebar, { SearchResult } from './components/Sidebar';
+import Sidebar, { SearchResult, SidebarTab } from './components/Sidebar';
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.min.mjs',
@@ -154,6 +154,7 @@ function App() {
   const [pdfDocument, setPdfDocument] = useState<any>(null); // PDFオブジェクト本体(検索用)
   const [searchText, setSearchText] = useState("");          // 検索ボックスの文字
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]); // ヒットした結果リスト  
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>("thumbs");
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const isDirtyRef = useRef(false);
@@ -378,7 +379,7 @@ function App() {
         }
       }
 
-      // ------- システムのPDFビューアで開く -------
+      // ------- システムのPDFビューアで開く (Ctrl + P) -------
       if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) {
         e.preventDefault();
         if (pdfPath) {
@@ -386,10 +387,17 @@ function App() {
         }
       }
 
-      // ------- ファイルを開く -------
+      // ------- ファイルを開く (Ctrl + O) -------
       if ((e.ctrlKey || e.metaKey) && (e.key === 'o' || e.key === 'O')) {
         e.preventDefault();
         handleOpenFile();
+      }
+
+      // --- 検索 (Ctrl + F) ---
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) {
+        e.preventDefault();
+        // タブを強制的に「検索」にする
+        setSidebarTab("search");
       }
     };
 
@@ -572,6 +580,8 @@ function App() {
           onSearchChange={handleSearch}
           searchResults={searchResults}
           onResultClick={(res) => handleJumpToPage(res.page)}
+          activeTab={sidebarTab}           // 今のタブを渡す
+          onTabChange={setSidebarTab}
         />
       </div>
 

@@ -1,5 +1,5 @@
 import katex from "katex";
-import React, { useState } from "react";
+import React, { useEffect, useRef } from "react";
 import { Document, Outline, Page } from "react-pdf";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
@@ -11,6 +11,9 @@ export interface SearchResult {
   context: string; // 前後の文字列
 }
 
+// タブの種類の型定義（App.tsxでも使うのでexport）
+export type SidebarTab = "thumbs" | "outline" | "annots" | "search";
+
 // 親から受け取るデータの型
 interface SidebarProps {
   pdfData: string | null;
@@ -19,11 +22,15 @@ interface SidebarProps {
   onJumpToPage: (pageNumber: number, y?: number) => void;
   pdfOptions: any;
   
-  // ▼▼▼ 追加: 検索用プロパティ ▼▼▼
+  // 検索用プロパティ
   searchText: string;
   onSearchChange: (text: string) => void;
   searchResults: SearchResult[];
   onResultClick: (result: SearchResult) => void;
+
+  // ▼▼▼ 追加: タブ制御を親から受け取る ▼▼▼
+  activeTab: SidebarTab;
+  onTabChange: (tab: SidebarTab) => void;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ 
@@ -35,10 +42,26 @@ const Sidebar: React.FC<SidebarProps> = ({
   searchText,
   onSearchChange,
   searchResults,
-  onResultClick
+  onResultClick,
+  activeTab,   // 親から受け取る
+  onTabChange  // 親から受け取る
 }) => {
-  // 'bookmarks' を削除し 'search' を追加
-  const [activeTab, setActiveTab] = useState<"thumbs" | "outline" | "annots" | "search">("thumbs");
+  
+  // 内部の useState は削除しました
+
+  // 検索入力欄への参照（フォーカス用）
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // activeTab が "search" に変わったら自動フォーカスする
+  useEffect(() => {
+    if (activeTab === "search" && searchInputRef.current) {
+      // タブ切り替えの描画完了を少し待ってからフォーカス
+      setTimeout(() => {
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select(); // 入力済みなら全選択
+      }, 50);
+    }
+  }, [activeTab]);
 
   // 数式のプレビュー生成
   const renderMathPreview = (latex: string) => {
@@ -53,10 +76,11 @@ const Sidebar: React.FC<SidebarProps> = ({
     <div style={{ display: "flex", flexDirection: "column", height: "100%", borderRight: "1px solid #ccc", background: "#f8f9fa", width: "280px" }}>
       {/* --- タブ切り替えヘッダー --- */}
       <div style={{ display: "flex", borderBottom: "1px solid #ccc", background: "#fff" }}>
-        <TabButton label="📄" active={activeTab === "thumbs"} onClick={() => setActiveTab("thumbs")} title="Thumbnails" />
-        <TabButton label="📑" active={activeTab === "outline"} onClick={() => setActiveTab("outline")} title="Outline" />
-        <TabButton label="📝" active={activeTab === "annots"} onClick={() => setActiveTab("annots")} title="Annotations" />
-        <TabButton label="🔍" active={activeTab === "search"} onClick={() => setActiveTab("search")} title="Search" />
+        {/* onClick で onTabChange を呼ぶように修正 */}
+        <TabButton label="📄" active={activeTab === "thumbs"} onClick={() => onTabChange("thumbs")} title="Thumbnails" />
+        <TabButton label="📑" active={activeTab === "outline"} onClick={() => onTabChange("outline")} title="Outline" />
+        <TabButton label="📝" active={activeTab === "annots"} onClick={() => onTabChange("annots")} title="Annotations" />
+        <TabButton label="🔍" active={activeTab === "search"} onClick={() => onTabChange("search")} title="Search" />
       </div>
 
       {/* --- コンテンツエリア (スクロール可能) --- */}
@@ -126,17 +150,19 @@ const Sidebar: React.FC<SidebarProps> = ({
           </div>
         )}
 
-        {/* 4. Search (検索) - Bookmarksの代わり */}
+        {/* 4. Search (検索) */}
         {activeTab === "search" && (
           <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
             {/* 検索ボックス */}
             <div style={{ marginBottom: "10px", position: "sticky", top: 0, background: "#f8f9fa", paddingBottom: "5px" }}>
               <input
+                ref={searchInputRef} // Refをセット
                 autoFocus
                 type="text"
                 placeholder="Search text..."
                 value={searchText}
                 onChange={(e) => onSearchChange(e.target.value)}
+                onKeyDown={(e) => e.stopPropagation()} // 親へのイベント伝播を防ぐ
                 style={{
                   width: "100%",
                   padding: "8px",
