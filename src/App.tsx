@@ -6,7 +6,7 @@ import renderMathInElement from "katex/dist/contrib/auto-render";
 import "katex/dist/katex.min.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Document, Page, pdfjs } from "react-pdf";
+import { Document, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
@@ -76,6 +76,117 @@ const base64ToBlob = (base64: string, type = "application/pdf") => {
   return new Blob([bytes], { type });
 };
 
+const usePdfPageImage = (page: number, scale: number, pdfPath: string) => {
+  const [src, setSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      const base64 = await invoke<string>("get_pdf_page_data", {
+        path: pdfPath,
+        pageNumber: page,
+        width: Math.floor(1200 * scale),
+      });
+
+      if (!cancelled) {
+        setSrc(`data:image/png;base64,${base64}`);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [page, scale, pdfPath]);
+
+  return src;
+};
+
+const PdfPage = ({
+  pageNumber,
+  scale,
+  annotations,
+  selectedId,
+  setSelectedId,
+  setDragState,
+  updateAnnotation,
+  pdfPath,
+  handleContextMenu
+}: any) => {
+  const src = usePdfPageImage(pageNumber, scale, pdfPath);
+  const imgRef = useRef<HTMLImageElement>(null);
+  const [size, setSize] = useState({ w: 1, h: 1 });
+
+  // 画像の実寸を取得（これが座標系）
+  const onLoad = () => {
+    if (imgRef.current) {
+      setSize({
+        w: imgRef.current.naturalWidth,
+        h: imgRef.current.naturalHeight,
+      });
+    }
+  };
+
+  return (
+    <div
+      style={{
+        position: "relative",
+        width: size.w * scale,
+        height: size.h * scale,
+        margin: "0 auto 20px auto",
+      }}
+      onContextMenu={(e) => handleContextMenu(e, pageNumber)}
+    >
+      {src && (
+        <img
+          ref={imgRef}
+          src={src}
+          onLoad={onLoad}
+          style={{
+            width: size.w * scale,
+            height: size.h * scale,
+            display: "block",
+          }}
+        />
+      )}
+
+      {/* Annotation Layer */}
+      <div
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          width: size.w * scale,
+          height: size.h * scale,
+          pointerEvents: "none",
+        }}
+      >
+        {annotations.map((ann: any) => (
+          <LatexAnnotation
+            key={ann.id}
+            data={ann}
+            scale={scale}
+            isSelected={selectedId === ann.id}
+            onUpdate={updateAnnotation}
+            onSelect={() => setSelectedId(ann.id)}
+            onMouseDown={(e: any) => {
+              setDragState({
+                id: ann.id,
+                startX: e.clientX,
+                startY: e.clientY,
+                initialAnnotX: ann.x,
+                initialAnnotY: ann.y,
+              });
+            }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+};
+
+
+
 const LatexAnnotation = ({ 
   data, 
   scale, 
@@ -134,8 +245,9 @@ const LatexAnnotation = ({
         position: "absolute",
         left: data.x * scale,
         top: data.y * scale,
+        transform: `scale(${scale})`,
+        transformOrigin: "top left",
         zIndex: isSelected ? 20 : 10,
-        cursor: isEditing ? "text" : "move",
       }}
       onClick={(e) => {
         e.stopPropagation();
@@ -687,54 +799,18 @@ function App() {
               itemContent={(index) => {
                 const pageNumber = index + 1;
                 return (
-                  <div 
+                  <PdfPage
                     key={pageNumber}
-                    id={`page-${pageNumber}`} 
-                    className="pdf-page-container"
-                    style={{ 
-                      position: "relative", 
-                      marginBottom: "20px", 
-                      border: "1px solid #999",
-                      width: "fit-content", 
-                      margin: "0 auto 20px auto" 
-                    }}
-                    onContextMenu={(e) => handleContextMenu(e, pageNumber)}
-                    onClick={(e) => e.stopPropagation()} 
-                  >
-                    <Page 
-                       pdf={pdfDocument}
-                       pageNumber={pageNumber} 
-                       scale={scale}
-                       renderAnnotationLayer={false}
-                       renderTextLayer={false}
-                       devicePixelRatio={1} // 画質を制限して負荷を下げる
-                       renderMode="canvas"
-                       loading={<div style={{height: 1000 * scale, width: 700 * scale, background: "white"}}>{t('ui.loading')}</div>}
-                       onRenderError={(e) => console.error("Render Error:", e)}
-                    />
-                    
-                    {annotations
-                      .filter(ann => ann.page === pageNumber)
-                      .map((ann) => (
-                        <LatexAnnotation 
-                          key={ann.id} 
-                          data={ann} 
-                          scale={scale}
-                          isSelected={selectedId === ann.id}
-                          onUpdate={updateAnnotation}
-                          onSelect={() => setSelectedId(ann.id)}
-                          onMouseDown={(e) => {
-                            setDragState({
-                              id: ann.id,
-                              startX: e.clientX,
-                              startY: e.clientY,
-                              initialAnnotX: ann.x,
-                              initialAnnotY: ann.y
-                            });
-                          }}
-                        />
-                    ))}
-                  </div>
+                    pageNumber={pageNumber}
+                    scale={scale}
+                    annotations={annotations.filter(a => a.page === pageNumber)}
+                    selectedId={selectedId}
+                    setSelectedId={setSelectedId}
+                    setDragState={setDragState}
+                    updateAnnotation={updateAnnotation}
+                    pdfPath={pdfPath!}
+                    handleContextMenu={handleContextMenu}
+                  />
                 );
               }}
             />

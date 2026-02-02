@@ -31,7 +31,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    
+    "resources": ["pdfium/libpdfium.so"],
     "linux": {
       "deb": {
         "depends": [

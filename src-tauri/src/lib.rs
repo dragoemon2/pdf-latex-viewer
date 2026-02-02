@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap};
 use std::fs;
 use lopdf::{Document, Object, Dictionary, StringFormat};
 use std::str;
@@ -6,7 +6,27 @@ use std::sync::Mutex;
 use tauri::State;
 use serde::{Deserialize, Serialize};
 
+use pdfium_render::prelude::*;
+use base64::{engine::general_purpose, Engine as _};
+
+use tauri::AppHandle;
+use tauri::Manager;
+use tauri::path::BaseDirectory;
+
 struct StartupFile(Mutex<Option<String>>);
+
+
+fn get_pdfium(handle: &AppHandle) -> Result<Pdfium, String> {
+    let lib_path = handle
+        .path()  // ← Manager trait
+        .resolve("pdfium/libpdfium.so", BaseDirectory::Resource)
+        .map_err(|e| format!("resource resolve error: {:?}", e))?;
+
+    let bindings = Pdfium::bind_to_library(lib_path)
+        .map_err(|e| format!("Pdfium bind error: {:?}", e))?;
+
+    Ok(Pdfium::new(bindings))
+}
 
 // Reactから呼ばれるコマンド: 起動時のファイルパスを返す
 #[tauri::command]
@@ -196,6 +216,53 @@ fn get_page_height(doc: &Document, page_id: lopdf::ObjectId) -> Option<f32> {
     }
 }
 
+
+#[tauri::command]
+async fn get_pdf_page_data(
+    handle: tauri::AppHandle,
+    path: String,
+    page_number: u32,
+    width: u32,
+) -> Result<String, String> {
+    let pdfium = get_pdfium(&handle)?;
+
+    let doc = pdfium
+        .load_pdf_from_file(&path, None)
+        .map_err(|e| format!("Load error: {:?}", e))?;
+
+    let page = doc
+        .pages()
+        .get((page_number - 1) as u16)
+        .map_err(|e| format!("Page error: {:?}", e))?;
+
+    // 幅を基準にスケール計算（高さ自動）
+    let scale = width as f32 / page.width().value;
+    let height = (page.height().value * scale) as u32;
+
+    let bitmap = page
+        .render_with_config(
+            &PdfRenderConfig::new()
+                .set_target_width(width as i32)
+                .set_target_height(height as i32)
+                .render_form_data(true)
+        )
+        .map_err(|e| format!("Render error: {:?}", e))?;
+
+    let image = bitmap.as_image().into_rgb8();
+
+    // PNGエンコード
+    let mut png_bytes: Vec<u8> = Vec::new();
+    image::DynamicImage::ImageRgb8(image)
+        .write_to(
+            &mut std::io::Cursor::new(&mut png_bytes),
+            image::ImageFormat::Png,
+        )
+        .map_err(|e| e.to_string())?;
+
+    Ok(general_purpose::STANDARD.encode(png_bytes))
+}
+
+
 #[tauri::command]
 fn open_pdf_file(path: String) -> Result<String, String> {
     // 1. ファイルを読み込む
@@ -225,7 +292,8 @@ pub fn run() {
             open_pdf_file, 
             load_annotations, 
             save_pdf_with_annotations,
-            get_startup_file
+            get_startup_file,
+            get_pdf_page_data
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
