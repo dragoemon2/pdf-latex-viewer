@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
+import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
 import "./App.css";
 import Sidebar, { SearchResult, SidebarTab } from './components/Sidebar';
 
@@ -28,7 +29,7 @@ interface Annotation {
   y: number;
   content: string;
   isNew?: boolean;
-  fontSize?: number; 
+  fontSize?: number;
 }
 
 interface ContextMenuState {
@@ -50,7 +51,7 @@ interface DragState {
 const LatexAnnotation = ({ 
   data, 
   scale, 
-  isSelected,
+  isSelected, 
   onUpdate,
   onMouseDown,
   onSelect
@@ -114,9 +115,7 @@ const LatexAnnotation = ({
           onChange={(e) => setText(e.target.value)}
           onBlur={handleBlur}
           onKeyDown={(e) => { 
-            if (e.ctrlKey || e.metaKey) {
-              return; 
-            }
+            if (e.ctrlKey || e.metaKey) return; 
             e.stopPropagation();
             if(e.key === 'Enter') handleBlur(); 
           }}
@@ -151,19 +150,19 @@ function App() {
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [numPages, setNumPages] = useState<number>(0); 
   const [isDirty, setIsDirty] = useState(false);
-  const [pdfDocument, setPdfDocument] = useState<any>(null); // PDFオブジェクト本体(検索用)
-  const [searchText, setSearchText] = useState("");          // 検索ボックスの文字
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([]); // ヒットした結果リスト  
+  const [pdfDocument, setPdfDocument] = useState<any>(null); 
+  const [searchText, setSearchText] = useState("");          
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);   
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>("thumbs");
 
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
   const isDirtyRef = useRef(false);
 
   useEffect(() => {
     isDirtyRef.current = isDirty;
   }, [isDirty]);
 
-  // 起動時に引数（ファイルパス）があるかチェックする
+  // 初期化ロード
   useEffect(() => {
     const checkStartupFile = async () => {
       try {
@@ -172,9 +171,9 @@ function App() {
           setNumPages(0); 
           setAnnotations([]);
           setPdfPath(path);
+          setPdfDocument(null);
           const base64 = await invoke<string>("open_pdf_file", { path });
           setPdfData(`data:application/pdf;base64,${base64}`);
-          
           try {
              const loadedAnnots = await invoke<Annotation[]>("load_annotations", { path });
              const formatted = loadedAnnots.map((a, i) => ({...a, id: Date.now() + i}));
@@ -187,20 +186,16 @@ function App() {
         console.error("Failed to check startup file", e);
       }
     };
-    
     checkStartupFile();
-  }, []); // 初回のみ実行
+  }, []);
 
   const onDocumentLoadSuccess = (pdf: any) => {
     setNumPages(pdf.numPages);
-    setPdfDocument(pdf); // 👈 【追加】検索用にこれを保存しておく必要があります！
-    
-    // ファイルが変わったら検索状態リセット
+    setPdfDocument(pdf);
     setSearchResults([]);
     setSearchText("");
   };
 
-  // ファイルオープン
   const handleOpenFile = async () => {
     if (isDirty) {
       const confirmed = await ask('保存されていない変更があります。\n変更を破棄して別のファイルを開きますか？', {
@@ -209,7 +204,7 @@ function App() {
         okLabel: '破棄して開く',
         cancelLabel: 'キャンセル',
       });
-      if (!confirmed) return; // キャンセルなら何もしない
+      if (!confirmed) return;
     }
 
     try {
@@ -220,14 +215,13 @@ function App() {
       if (selectedPath && typeof selectedPath === 'string') {
         setNumPages(0);
         setAnnotations([]);
-
         setPdfPath(selectedPath);
+        setPdfDocument(null); 
+        
         const base64 = await invoke<string>("open_pdf_file", { path: selectedPath });
         setPdfData(`data:application/pdf;base64,${base64}`);
 
-        if (scrollContainerRef.current) {
-          scrollContainerRef.current.scrollTop = 0;
-        }
+        virtuosoRef.current?.scrollToIndex({ index: 0 });
 
         try {
            const loadedAnnots = await invoke<Annotation[]>("load_annotations", { path: selectedPath });
@@ -242,29 +236,23 @@ function App() {
     }
   };
 
-  // ファイルパスが変わったらウィンドウタイトルを更新する
   useEffect(() => {
     const updateTitle = async () => {
-      
       try {
         const appWindow = getCurrentWindow();
-        
         if (pdfPath) {
           const fileName = pdfPath.split(/[/\\]/).pop() || "PDF Viewer";
-          console.log("Updating window title to:", fileName);
           await appWindow.setTitle(fileName);
         } else {
           await appWindow.setTitle("PDF Latex Viewer");
         }
       } catch (e) {
-        // もしここでエラーが出る場合は、権限設定が反映されていません
-        console.error("ウィンドウタイトルの変更に失敗しました:", e);
+        console.error(e);
       }
     };
     updateTitle();
   }, [pdfPath]);
 
-  // 【上書き保存】 (Ctrl + S)
   const handleSave = useCallback(async () => {
     if (!pdfPath) return;
     try {
@@ -278,25 +266,18 @@ function App() {
     }
   }, [pdfPath, annotations]);
 
-  // 【名前を付けて保存】 (Ctrl + Shift + S)
   const handleSaveAs = useCallback(async () => {
     try {
-      // ダイアログを出して保存先パスを取得
       const newPath = await save({
         filters: [{ name: 'PDF', extensions: ['pdf'] }],
         defaultPath: 'annotated.pdf'
       });
-      
       if (newPath) {
-        // 新しいパスに保存を実行
         await invoke("save_pdf_with_annotations", { 
           path: newPath, 
           annotations: annotations 
         });
-        
-        // 作業対象を新しいファイルに切り替えるなら以下を実行
         setPdfPath(newPath); 
-        
         alert(`保存しました！\n${newPath}`);
       }
     } catch (e) {
@@ -305,10 +286,8 @@ function App() {
   }, [annotations]);
 
 
-  // キーボードショートカットの監視 (Delete & Save)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // --- 削除機能 (Delete) ---
       if ((e.key === "Delete" || e.key === "Backspace") && selectedId !== null) {
         if (document.activeElement === document.body) {
            setAnnotations((prev) => prev.filter(a => a.id !== selectedId));
@@ -317,96 +296,61 @@ function App() {
         }
       }
 
-      // --- 保存機能 (Ctrl + S / Ctrl + Shift + S) ---
-      // metaKeyはMacのCommandキー対応
       if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
-        e.preventDefault(); // ブラウザのデフォルト保存ダイアログを抑制
-
+        e.preventDefault();
         if (e.shiftKey) {
-          // Ctrl + Shift + S -> 名前を付けて保存
           handleSaveAs();
         } else {
-          // Ctrl + S -> 上書き保存
-          if (pdfPath) {
-            handleSave();
-          } else {
-            // パスがない（未保存）場合は名前を付けて保存へ誘導
-            handleSaveAs();
-          }
+          if (pdfPath) handleSave(); else handleSaveAs();
         }
       }
 
-      // ------- 拡大・縮小 -------
-      // Ctrl + '+' or Ctrl + '=' -> 拡大
       if ((e.ctrlKey || e.metaKey) && (e.key === '+' || e.key === '=' || e.key === ';')) {
         e.preventDefault();
-        
-        // アノテーション選択中なら「そのアノテーション」を大きく
         if (selectedId !== null) {
-        setIsDirty(true);
-        setAnnotations(prev => prev.map(a => {
-            if (a.id === selectedId) {
-              // fontSizeがない場合はデフォルト20からスタート (+2ずつ)
-              return { ...a, fontSize: (a.fontSize || 20) + 2 };
-            }
+          setIsDirty(true);
+          setAnnotations(prev => prev.map(a => {
+            if (a.id === selectedId) return { ...a, fontSize: (a.fontSize || 20) + 2 };
             return a;
           }));
-        } 
-        // 選択してなければ「画面全体のズーム」
-        else {
+        } else {
           setScale(s => parseFloat((s + 0.2).toFixed(1)));
         }
       }
 
-      // 縮小 (Ctrl + -)
       if ((e.ctrlKey || e.metaKey) && e.key === '-') {
         e.preventDefault();
-
-        // アノテーション選択中なら「そのアノテーション」を小さく
         if (selectedId !== null) {
-        setIsDirty(true);
-        setAnnotations(prev => prev.map(a => {
-            if (a.id === selectedId) {
-              // 最小サイズは 10 とする
-              return { ...a, fontSize: Math.max(10, (a.fontSize || 20) - 2) };
-            }
+          setIsDirty(true);
+          setAnnotations(prev => prev.map(a => {
+            if (a.id === selectedId) return { ...a, fontSize: Math.max(10, (a.fontSize || 20) - 2) };
             return a;
           }));
-        } 
-        // 選択してなければ「画面全体のズーム」
-        else {
+        } else {
           setScale(s => Math.max(0.4, parseFloat((s - 0.2).toFixed(1))));
         }
       }
 
-      // ------- システムのPDFビューアで開く (Ctrl + P) -------
       if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) {
         e.preventDefault();
-        if (pdfPath) {
-          openPath(pdfPath).catch(console.error);
-        }
+        if (pdfPath) openPath(pdfPath).catch(console.error);
       }
 
-      // ------- ファイルを開く (Ctrl + O) -------
       if ((e.ctrlKey || e.metaKey) && (e.key === 'o' || e.key === 'O')) {
         e.preventDefault();
         handleOpenFile();
       }
 
-      // --- 検索 (Ctrl + F) ---
       if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) {
         e.preventDefault();
-        // タブを強制的に「検索」にする
         setSidebarTab("search");
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedId, pdfPath, handleSave, handleSaveAs, handleOpenFile]); // 依存配列に保存関数を含める
+  }, [selectedId, pdfPath, handleSave, handleSaveAs, handleOpenFile]);
 
-
-  // ドラッグ処理
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!dragState) return;
@@ -475,56 +419,37 @@ function App() {
     setIsDirty(true);
   };
 
-  // 【追加】ページジャンプ機能
   const handleJumpToPage = (pageNumber: number) => {
-    // 該当するページの要素を探す
-    const element = document.getElementById(`page-${pageNumber}`);
-    if (element) {
-      element.scrollIntoView({ behavior: "smooth" });
-    }
+    virtuosoRef.current?.scrollToIndex({
+      index: pageNumber - 1, 
+      align: 'start'
+    });
   };
 
-  // 検索
   const handleSearch = async (query: string) => {
     setSearchText(query);
-    
-    // クエリが空 or PDF未ロードなら結果を空にする
     if (!query || !pdfDocument) {
       setSearchResults([]);
       return;
     }
-
     const results: SearchResult[] = [];
     const lowerQuery = query.toLowerCase();
 
-    // 1ページ目から全ページ走査
     for (let i = 1; i <= pdfDocument.numPages; i++) {
       const page = await pdfDocument.getPage(i);
       const textContent = await page.getTextContent();
-      
-      // ページ内のテキストを結合
       const fullText = textContent.items.map((item: any) => item.str).join("");
       const lowerFullText = fullText.toLowerCase();
 
-      // ヒット箇所を探す
       let startIndex = 0;
       let matchIndex = 0;
-      
       while (true) {
         const index = lowerFullText.indexOf(lowerQuery, startIndex);
         if (index === -1) break;
-
-        // コンテキスト（前後の文字）を抽出
         const startContext = Math.max(0, index - 20);
         const endContext = Math.min(fullText.length, index + query.length + 20);
         const contextStr = fullText.slice(startContext, endContext);
-
-        results.push({
-          page: i,
-          matchIndex: matchIndex,
-          context: contextStr // サイドバーに表示する文字
-        });
-
+        results.push({ page: i, matchIndex: matchIndex, context: contextStr });
         startIndex = index + query.length;
         matchIndex++;
       }
@@ -532,46 +457,33 @@ function App() {
     setSearchResults(results);
   };
 
-  // ウィンドウ閉じる前の確認ダイアログ
   useEffect(() => {
     const appWindow = getCurrentWindow();
-
-    // 閉じるリクエスト（×ボタンやAlt+F4）を監視
     const unlistenPromise = appWindow.onCloseRequested(async (event) => {
-      // 最新の状態をRefから取得
       if (isDirtyRef.current) {
-        // 一旦閉じるのを阻止する
         event.preventDefault();
-
         const confirmed = await ask('保存されていない変更があります。\n変更を破棄して終了しますか？', {
           title: '終了の確認',
           kind: 'warning',
           okLabel: '終了する',
           cancelLabel: 'キャンセル',
         });
-
         if (confirmed) {
-          // ユーザーが「終了」を選んだら
-          // フラグを折ってから（ループ防止）再度閉じる
           isDirtyRef.current = false;
           setIsDirty(false); 
           await appWindow.close();
         }
       }
     });
-
-    return () => {
-      unlistenPromise.then(unlisten => unlisten());
-    };
-  }, []); // 初回のみ登録
+    return () => { unlistenPromise.then(unlisten => unlisten()); };
+  }, []);
 
   return (
-    <div className="app-layout"> {/* コンテナ変更 */}
-      
-      {/* 左側: サイドバー */}
+    <div className="app-layout">
       <div className="sidebar-container">
         <Sidebar 
-          pdfData={pdfData}
+          pdfDocument={pdfDocument} 
+          pdfData={pdfData}         
           numPages={numPages}
           annotations={annotations}
           onJumpToPage={handleJumpToPage}
@@ -580,15 +492,12 @@ function App() {
           onSearchChange={handleSearch}
           searchResults={searchResults}
           onResultClick={(res) => handleJumpToPage(res.page)}
-          activeTab={sidebarTab}           // 今のタブを渡す
+          activeTab={sidebarTab}
           onTabChange={setSidebarTab}
-          pdfDocument={pdfDocument}
         />
       </div>
 
-      {/* 右側: メインコンテンツ */}
       <div className="main-content">
-        {/* ツールバー */}
         <div className="toolbar">
           <button onClick={handleOpenFile}>📂 開く</button>
           <button onClick={handleSave} disabled={!pdfPath}>💾 保存</button>
@@ -597,74 +506,87 @@ function App() {
           <button onClick={() => setScale(s => Math.max(0.4, s - 0.2))}>🔍 縮小</button>
         </div>
 
-        {/* PDF表示エリア (コンテナの onClick で選択解除) */}
         <div 
           className="pdf-scroll-container" 
           onClick={handleBackgroundClick}
-          ref={scrollContainerRef}
+          style={{ height: "100%", width: "100%", overflow: "hidden" }}
         >
           {pdfData && (
-            <div 
-              style={{ position: "relative", width: "fit-content" }}
-            >
-              <Document 
-                file={pdfData} 
-                options={pdfOptions} 
-                onLoadSuccess={onDocumentLoadSuccess}
-              >
-                {Array.from(new Array(numPages), (_, index) => {
-                  const pageNumber = index + 1;
-                  return (
-                    <div 
-                      key={pageNumber}
-                      id={`page-${pageNumber}`} 
-                      className="pdf-page-container"
-                      style={{ 
-                        position: "relative", 
-                        marginBottom: "10px", 
-                        border: "1px solid #999" 
-                      }}
-                      onContextMenu={(e) => handleContextMenu(e, pageNumber)}
-                      onClick={(e) => e.stopPropagation()} 
-                    >
-                      <Page pageNumber={pageNumber} scale={scale} />
-                      
-                      {/* アノテーション表示 (フィルタリング) */}
-                      {annotations
-                        .filter(ann => ann.page === pageNumber)
-                        .map((ann) => (
-                          <LatexAnnotation 
-                            key={ann.id} 
-                            data={ann} 
-                            scale={scale}
-                            isSelected={selectedId === ann.id}
-                            onUpdate={updateAnnotation}
-                            onSelect={() => setSelectedId(ann.id)}
-                            onMouseDown={(e) => {
-                              setDragState({
-                                id: ann.id,
-                                startX: e.clientX,
-                                startY: e.clientY,
-                                initialAnnotX: ann.x,
-                                initialAnnotY: ann.y
-                              });
-                            }}
-                          />
-                      ))}
-                    </div>
-                  );
-                })}
-              </Document>
-            </div>
+             <div style={{ display: 'none' }}>
+                <Document 
+                   file={pdfData} 
+                   options={pdfOptions} 
+                   onLoadSuccess={onDocumentLoadSuccess}
+                />
+             </div>
+          )}
+
+          {pdfDocument ? (
+            <Virtuoso
+              ref={virtuosoRef}
+              style={{ height: "100%", width: "100%" }}
+              totalCount={numPages}
+              itemContent={(index) => {
+                const pageNumber = index + 1;
+                return (
+                  <div 
+                    key={pageNumber}
+                    id={`page-${pageNumber}`} 
+                    className="pdf-page-container"
+                    style={{ 
+                      position: "relative", 
+                      marginBottom: "20px", 
+                      border: "1px solid #999",
+                      width: "fit-content", 
+                      margin: "0 auto 20px auto" 
+                    }}
+                    onContextMenu={(e) => handleContextMenu(e, pageNumber)}
+                    onClick={(e) => e.stopPropagation()} 
+                  >
+                    {/* ▼▼▼ エラー回避のためにアノテーション層を無効化 ▼▼▼ */}
+                    <Page 
+                       pdf={pdfDocument}
+                       pageNumber={pageNumber} 
+                       scale={scale}
+                       renderAnnotationLayer={false} // 👈 必須！
+                       renderTextLayer={true} // テキスト選択用（重ければfalse）
+                       loading={<div style={{height: 1000 * scale, width: 700 * scale, background: "white"}}>Loading...</div>}
+                    />
+                    
+                    {annotations
+                      .filter(ann => ann.page === pageNumber)
+                      .map((ann) => (
+                        <LatexAnnotation 
+                          key={ann.id} 
+                          data={ann} 
+                          scale={scale}
+                          isSelected={selectedId === ann.id}
+                          onUpdate={updateAnnotation}
+                          onSelect={() => setSelectedId(ann.id)}
+                          onMouseDown={(e) => {
+                            setDragState({
+                              id: ann.id,
+                              startX: e.clientX,
+                              startY: e.clientY,
+                              initialAnnotX: ann.x,
+                              initialAnnotY: ann.y
+                            });
+                          }}
+                        />
+                    ))}
+                  </div>
+                );
+              }}
+            />
+          ) : (
+            pdfData && <div style={{ color: "#fff", padding: "20px" }}>Loading PDF...</div>
           )}
         </div>
       </div>
 
-      {/* 右クリックメニュー (position: fixed なのでどこに置いてもOK) */}
       {contextMenu && (
         <div
-           /* ... contextMenuのスタイルはそのまま ... */
-           style={{
+          style={{
             position: "fixed",
             top: contextMenu.mouseY,
             left: contextMenu.mouseX,
@@ -679,7 +601,6 @@ function App() {
         >
           <div 
             onClick={executeAddAnnotation}
-            /* ... スタイルそのまま ... */
             style={{ padding: "8px 20px", cursor: "pointer", fontSize: "14px" }}
           >
             ➕ アノテーションを追加
@@ -689,6 +610,5 @@ function App() {
     </div>
   );
 }
-
 
 export default App;

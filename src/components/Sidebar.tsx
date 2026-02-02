@@ -1,8 +1,6 @@
-import React, { useEffect, useRef } from "react";
-// ▼▼▼ requireをやめて標準importに戻す ▼▼▼
-import { Document, Outline, Page } from "react-pdf";
-// ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 import katex from "katex";
+import React, { useEffect, useRef } from "react";
+import { Document, Outline, Page } from "react-pdf";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 import { Virtuoso } from "react-virtuoso";
@@ -34,8 +32,8 @@ interface SidebarProps {
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ 
-  pdfDocument, // 👈 サムネイルはこれを使う（高速・エラー回避）
-  pdfData,     // 👈 目次はこれを使う（Documentコンポーネント用）
+  pdfDocument,
+  pdfData,
   numPages, 
   annotations, 
   onJumpToPage,
