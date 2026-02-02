@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { ask, open, save } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
-import katex from "katex";
+import renderMathInElement from "katex/dist/contrib/auto-render";
 import "katex/dist/katex.min.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -12,6 +12,12 @@ import "react-pdf/dist/Page/TextLayer.css";
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
 import "./App.css";
 import Sidebar, { SearchResult, SidebarTab } from './components/Sidebar';
+
+const pdfOptions = {
+  cMapUrl: new URL('/cmaps/', window.location.origin).toString(),
+  cMapPacked: true,
+  standardFontDataUrl: new URL('/standard_fonts/', window.location.origin).toString(),
+};
 
 const LANGUAGES = [
   { code: 'ja', label: '🇯🇵日本語' },
@@ -25,10 +31,13 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url,
 ).toString();
 
-const pdfOptions = {
-  cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/cmaps/`,
-  cMapPacked: true,
-};
+console.log(`PDF.js Version: ${pdfjs.version}`);
+
+// const pdfOptions = {
+//   cMapUrl: new URL('/cmaps/', window.location.origin).toString(),
+//   cMapPacked: true,
+//   standardFontDataUrl: new URL('/standard_fonts/', window.location.origin).toString(),
+// };
 
 interface Annotation {
   id: number;
@@ -85,12 +94,23 @@ const LatexAnnotation = ({
   const [isEditing, setIsEditing] = useState(data.isNew);
   const [text, setText] = useState(data.content);
   const containerRef = useRef<HTMLDivElement>(null);
-  const { t } = useTranslation(); // エラーメッセージ用
+  const { t } = useTranslation();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [isComposing, setIsComposing] = useState(false);
 
   useEffect(() => {
     if (!isEditing && containerRef.current) {
+      containerRef.current.textContent = text;
       try {
-        katex.render(text, containerRef.current, { throwOnError: false });
+        renderMathInElement(containerRef.current, {
+          delimiters: [
+            { left: "$$", right: "$$", display: true },
+            { left: "$", right: "$", display: false },
+            { left: "\\(", right: "\\)", display: false },
+            { left: "\\[", right: "\\]", display: true }
+          ],
+          throwOnError: false
+        });
       } catch (e) {
         containerRef.current.innerText = t('ui.error');
       }
@@ -98,8 +118,12 @@ const LatexAnnotation = ({
   }, [text, isEditing, t]);
 
   const handleBlur = () => {
+    if (inputRef.current) {
+      const newText = inputRef.current.value;
+      setText(newText);
+      onUpdate(data.id, newText);
+    }
     setIsEditing(false);
-    onUpdate(data.id, text);
   };
 
   const fontSize = data.fontSize || 20;
@@ -110,7 +134,6 @@ const LatexAnnotation = ({
         position: "absolute",
         left: data.x * scale,
         top: data.y * scale,
-        transform: "translate(0, -50%)",
         zIndex: isSelected ? 20 : 10,
         cursor: isEditing ? "text" : "move",
       }}
@@ -128,18 +151,37 @@ const LatexAnnotation = ({
         setIsEditing(true);
       }}
     >
+
+
       {isEditing ? (
         <input
+          ref={inputRef}
           autoFocus
           value={text}
-          onChange={(e) => setText(e.target.value)}
-          onBlur={handleBlur}
-          onKeyDown={(e) => { 
-            if (e.ctrlKey || e.metaKey) return; 
-            e.stopPropagation();
-            if(e.key === 'Enter') handleBlur(); 
+
+          onChange={(e) => {
+            if (!isComposing) {
+              setText(e.target.value);
+            }
           }}
-          style={{ fontSize: `${fontSize * scale}px`, padding: "4px" }}
+
+          onCompositionStart={() => {
+            setIsComposing(true);
+          }}
+
+          onCompositionEnd={(e) => {
+            setIsComposing(false);
+            setText(e.currentTarget.value); // 確定文字列をここで反映
+          }}
+
+          onBlur={handleBlur}
+          onKeyDown={(e) => {
+            if (e.ctrlKey || e.metaKey) return;
+            e.stopPropagation();
+            if (e.key === 'Enter') {
+              e.currentTarget.blur();
+            }
+          }}
         />
       ) : (
         <div
@@ -152,7 +194,10 @@ const LatexAnnotation = ({
             borderRadius: "4px",
             fontSize: `${fontSize * scale}px`,
             boxShadow: isSelected ? "0 4px 8px rgba(0,0,0,0.2)" : "0 2px 4px rgba(0,0,0,0.1)",
-            userSelect: "none"
+
+            userSelect: "text",
+            WebkitUserSelect: "text",
+            MozUserSelect: "text",
           }}
         />
       )}
@@ -181,6 +226,12 @@ function App() {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const isDirtyRef = useRef(false);
   const pdfUrlRef = useRef<string | null>(null);
+
+  // const pdfOptions = useMemo(() => ({
+  //   cMapUrl: new URL('/cmaps/', window.location.origin).toString(),
+  //   cMapPacked: true,
+  //   standardFontDataUrl: new URL('/standard_fonts/', window.location.origin).toString(),
+  // }), []); // 空の配列を渡すことで、アプリ起動時に1回だけ作成される
 
   useEffect(() => {
     isDirtyRef.current = isDirty;
@@ -391,6 +442,10 @@ function App() {
         e.preventDefault();
         setSidebarTab("search");
       }
+
+      if (e.key === "Escape") {
+        setContextMenu(null);
+        setSelectedId(null);}
     };
 
     window.addEventListener("keydown", handleKeyDown);
@@ -540,7 +595,7 @@ function App() {
   };
 
   return (
-    <div className="app-layout">
+    <div className="app-layout" onMouseDown={() => setContextMenu(null)}>
       <div className="sidebar-container">
         {/* Sidebarも内部で t() を使うべきですが、今回はApp.tsxのみの修正なのでProps等はそのまま */}
         <Sidebar 
@@ -627,7 +682,8 @@ function App() {
               ref={virtuosoRef}
               style={{ height: "100%", width: "100%" }}
               totalCount={numPages}
-              overscan={2000}
+              overscan={1000}
+              onScroll={() => setContextMenu(null)}
               itemContent={(index) => {
                 const pageNumber = index + 1;
                 return (
@@ -650,8 +706,11 @@ function App() {
                        pageNumber={pageNumber} 
                        scale={scale}
                        renderAnnotationLayer={false}
-                       renderTextLayer={true}
+                       renderTextLayer={false}
+                       devicePixelRatio={1} // 画質を制限して負荷を下げる
+                       renderMode="canvas"
                        loading={<div style={{height: 1000 * scale, width: 700 * scale, background: "white"}}>{t('ui.loading')}</div>}
+                       onRenderError={(e) => console.error("Render Error:", e)}
                     />
                     
                     {annotations
@@ -699,6 +758,7 @@ function App() {
             borderRadius: "4px"
           }}
           onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
         >
           <div 
             onClick={executeAddAnnotation}

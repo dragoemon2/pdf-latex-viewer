@@ -1,3 +1,6 @@
+/* =========================================
+   1. アプリ全体のレイアウト設定
+   ========================================= */
 /* ブラウザのデフォルト余白を消す */
 body {
   margin: 0;
@@ -71,3 +74,21 @@ body {
   color: #007bff;
 }
 
+
+.react-pdf__Page__textContent,
+.textLayer,
+span[role="presentation"] {
+    display: none !important;
+}
+
+/* もしCanvasが描画されたら、それを確実に表示する */
+.react-pdf__Page canvas {
+    display: block !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+}
+
+/* ページ背景を白く固定（Canvasロード中のちらつき防止） */
+.react-pdf__Page {
+    background-color: white !important;
+}
