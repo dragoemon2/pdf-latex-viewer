@@ -4,12 +4,16 @@
 
 ## Installation
 
-### Linux
+### Linux (Ubuntu/Debian)
 
+1. Go to the [latest release page](https://github.com/dragoemon/pdf-latex-viewer/releases/latest).
+2. Download the file ending in `.deb` (e.g., `pdf-latex-viewer_..._amd64.deb`).
+3. Run the following command:
 ```bash
-wget https://github.com/dragoemon2/pdf-latex-viewer/releases/download/v0.1.0/pdf-latex-viewer_0.1.0_amd64.deb
-sudo apt install ./pdf-latex-viewer_0.1.0_amd64.deb
+sudo apt update
+sudo apt install ./pdf-latex-viewer_..._amd64.deb
 ```
+
 
 ## Features
 

@@ -2,30 +2,10 @@ name: Release
 on:
   push:
     tags:
-      - 'v*' 
+      - 'v*'
 
 jobs:
-  create-release:
-    permissions:
-      contents: write
-    runs-on: ubuntu-latest
-    outputs:
-      release_id: ${{ steps.create-release.outputs.id }}
-    steps:
-      - uses: actions/checkout@v3
-      - name: Create Release
-        id: create-release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref }}
-          release_name: pdf-latex-viewer ${{ github.ref }}
-          draft: true
-          prerelease: false
-
-  build-tauri:
-    needs: create-release
+  publish-tauri:
     permissions:
       contents: write
     strategy:
@@ -35,23 +15,27 @@ jobs:
 
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: setup node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: lts/*
 
       - name: install Rust stable
         uses: dtolnay/rust-toolchain@stable
+        with:
+          # macOSの場合はクロスコンパイルターゲットを追加
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: install dependencies (ubuntu only)
         if: matrix.platform == 'ubuntu-24.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libsoup-3.0-dev
+          # Ubuntu 24.04 / Tauri v2 用の完全な依存関係
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libsoup-3.0-dev javascriptcoregtk-4.1-dev
 
-      - name: install dependencies (javascript)
+      - name: install frontend dependencies
         run: npm install
 
       - name: Build and Upload
@@ -59,4 +43,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          releaseId: ${{ needs.create-release.outputs.release_id }}
+          # ここが重要：Actionにリリース作成を任せる設定
+          tagName: ${{ github.ref_name }}
+          releaseName: 'PDF LaTeX Viewer v__VERSION__'
+          body: 'See the assets to download this version and install.'
+          draft: true
+          prerelease: false
