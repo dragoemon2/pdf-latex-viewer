@@ -196,14 +196,9 @@ fn get_page_height(doc: &Document, page_id: lopdf::ObjectId) -> Option<f32> {
     }
 }
 
-// ▼▼▼ 修正箇所: ここを劇的に高速化 ▼▼▼
 #[tauri::command]
 fn open_pdf_file(path: String) -> Result<String, String> {
-    // lopdf でのパース(Document::load)と保存(doc.save_to)をやめ、
-    // 単にファイルをバイナリとして読み込んで返すだけにします。
-    // フロントエンド側でアノテーション表示をOFFにしているため、ここで削除処理をする必要はありません。
-
-    // 1. ファイルを読み込む (fs::read は非常に高速です)
+    // 1. ファイルを読み込む
     let buffer = fs::read(&path).map_err(|e| e.to_string())?;
 
     // 2. Base64エンコード
@@ -212,8 +207,6 @@ fn open_pdf_file(path: String) -> Result<String, String> {
     
     Ok(encoded)
 }
-// ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
-
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

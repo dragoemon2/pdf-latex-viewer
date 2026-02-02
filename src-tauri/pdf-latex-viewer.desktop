@@ -1,0 +1,10 @@
+[Desktop Entry]
+Categories=
+Comment=A Tauri App
+Exec=pdf-latex-viewer %F
+StartupWMClass=pdf-latex-viewer
+Icon=pdf-latex-viewer
+Name=pdf-latex-viewer
+Terminal=false
+Type=Application
+MimeType=application/pdf

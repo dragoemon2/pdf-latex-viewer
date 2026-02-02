@@ -31,13 +31,17 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    
     "linux": {
       "deb": {
         "depends": [
-          "libwebkit2gtk-4.0-37", 
+          "libwebkit2gtk-4.1-0", 
           "libgtk-3-0", 
           "libappindicator3-1"
-        ]
+        ],
+        "files": {
+          "/usr/share/applications/pdf-latex-viewer.desktop": "pdf-latex-viewer.desktop"
+        }
       }
     },
     "fileAssociations": [

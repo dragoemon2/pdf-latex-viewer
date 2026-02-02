@@ -5,12 +5,20 @@ import { openPath } from "@tauri-apps/plugin-opener";
 import katex from "katex";
 import "katex/dist/katex.min.css";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
 import "./App.css";
 import Sidebar, { SearchResult, SidebarTab } from './components/Sidebar';
+
+const LANGUAGES = [
+  { code: 'ja', label: '🇯🇵日本語' },
+  { code: 'en', label: '🇺🇸English' },
+  // { code: 'zh', label: '🇨🇳中文' }, 
+  // { code: 'de', label: '🇩🇪Deutsch' },
+];
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.min.mjs',
@@ -48,6 +56,17 @@ interface DragState {
   initialAnnotY: number;
 }
 
+// Base64をBlobに変換するヘルパー関数
+const base64ToBlob = (base64: string, type = "application/pdf") => {
+  const binStr = window.atob(base64);
+  const len = binStr.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binStr.charCodeAt(i);
+  }
+  return new Blob([bytes], { type });
+};
+
 const LatexAnnotation = ({ 
   data, 
   scale, 
@@ -66,16 +85,17 @@ const LatexAnnotation = ({
   const [isEditing, setIsEditing] = useState(data.isNew);
   const [text, setText] = useState(data.content);
   const containerRef = useRef<HTMLDivElement>(null);
+  const { t } = useTranslation(); // エラーメッセージ用
 
   useEffect(() => {
     if (!isEditing && containerRef.current) {
       try {
         katex.render(text, containerRef.current, { throwOnError: false });
       } catch (e) {
-        containerRef.current.innerText = "Error";
+        containerRef.current.innerText = t('ui.error');
       }
     }
-  }, [text, isEditing]);
+  }, [text, isEditing, t]);
 
   const handleBlur = () => {
     setIsEditing(false);
@@ -126,7 +146,7 @@ const LatexAnnotation = ({
           className="latex-annotation"
           ref={containerRef}
           style={{
-            backgroundColor: isSelected ? "rgba(230, 240, 255, 0.9)" : "rgba(255, 255, 255, 0.85)",
+            backgroundColor: isSelected ? "rgba(230, 240, 255, 1)" : "#ffffff",
             padding: "4px 8px",
             border: isSelected ? "2px solid #007bff" : "1px solid rgba(0,0,0,0.1)",
             borderRadius: "4px",
@@ -141,6 +161,9 @@ const LatexAnnotation = ({
 };
 
 function App() {
+  // 👇 翻訳フックを使用
+  const { t, i18n } = useTranslation();
+
   const [pdfPath, setPdfPath] = useState<string | null>(null);
   const [pdfData, setPdfData] = useState<string | null>(null);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
@@ -157,6 +180,7 @@ function App() {
 
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const isDirtyRef = useRef(false);
+  const pdfUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
     isDirtyRef.current = isDirty;
@@ -172,8 +196,17 @@ function App() {
           setAnnotations([]);
           setPdfPath(path);
           setPdfDocument(null);
+
           const base64 = await invoke<string>("open_pdf_file", { path });
-          setPdfData(`data:application/pdf;base64,${base64}`);
+          
+          if (pdfUrlRef.current) {
+             URL.revokeObjectURL(pdfUrlRef.current);
+          }
+          const blob = base64ToBlob(base64);
+          const url = URL.createObjectURL(blob);
+          pdfUrlRef.current = url;
+          setPdfData(url);
+
           try {
              const loadedAnnots = await invoke<Annotation[]>("load_annotations", { path });
              const formatted = loadedAnnots.map((a, i) => ({...a, id: Date.now() + i}));
@@ -198,11 +231,11 @@ function App() {
 
   const handleOpenFile = async () => {
     if (isDirty) {
-      const confirmed = await ask('保存されていない変更があります。\n変更を破棄して別のファイルを開きますか？', {
-        title: '警告',
+      const confirmed = await ask(t('dialog.unsavedChanges'), {
+        title: t('dialog.warning'),
         kind: 'warning',
-        okLabel: '破棄して開く',
-        cancelLabel: 'キャンセル',
+        okLabel: t('dialog.discardAndOpen'),
+        cancelLabel: t('dialog.cancel'),
       });
       if (!confirmed) return;
     }
@@ -218,8 +251,19 @@ function App() {
         setPdfPath(selectedPath);
         setPdfDocument(null); 
         
+        setPdfData(null);
+        
         const base64 = await invoke<string>("open_pdf_file", { path: selectedPath });
-        setPdfData(`data:application/pdf;base64,${base64}`);
+
+        if (pdfUrlRef.current) {
+          URL.revokeObjectURL(pdfUrlRef.current);
+          pdfUrlRef.current = null;
+        }
+
+        const blob = base64ToBlob(base64);
+        const url = URL.createObjectURL(blob);
+        pdfUrlRef.current = url;
+        setPdfData(url);
 
         virtuosoRef.current?.scrollToIndex({ index: 0 });
 
@@ -261,10 +305,11 @@ function App() {
         annotations: annotations 
       });
       setIsDirty(false);
+      // alert(t('dialog.saveSuccess')); // 必要ならコメントアウト解除
     } catch (e) {
-      alert("保存に失敗しました");
+      alert(t('dialog.saveFailed'));
     }
-  }, [pdfPath, annotations]);
+  }, [pdfPath, annotations, t]);
 
   const handleSaveAs = useCallback(async () => {
     try {
@@ -278,12 +323,12 @@ function App() {
           annotations: annotations 
         });
         setPdfPath(newPath); 
-        alert(`保存しました！\n${newPath}`);
+        alert(`${t('dialog.saveSuccess')}\n${newPath}`);
       }
     } catch (e) {
-      alert("保存にキャンセルまたは失敗しました");
+      alert(t('dialog.saveCancelled'));
     }
-  }, [annotations]);
+  }, [annotations, t]);
 
 
   useEffect(() => {
@@ -463,11 +508,11 @@ function App() {
     const unlistenPromise = appWindow.onCloseRequested(async (event) => {
       if (isDirtyRef.current) {
         event.preventDefault();
-        const confirmed = await ask('保存されていない変更があります。\n変更を破棄して終了しますか？', {
-          title: '終了の確認',
+        const confirmed = await ask(t('dialog.unsavedChangesClose'), {
+          title: t('dialog.confirmClose'),
           kind: 'warning',
-          okLabel: '終了する',
-          cancelLabel: 'キャンセル',
+          okLabel: t('dialog.close'),
+          cancelLabel: t('dialog.cancel'),
         });
         if (confirmed) {
           isDirtyRef.current = false;
@@ -477,11 +522,27 @@ function App() {
       }
     });
     return () => { unlistenPromise.then(unlisten => unlisten()); };
+  }, [t]);
+
+  // アプリ終了時の掃除
+  useEffect(() => {
+    return () => {
+      if (pdfUrlRef.current) {
+        URL.revokeObjectURL(pdfUrlRef.current);
+      }
+    };
   }, []);
+
+  // 言語切り替え関数
+  const handleLanguageChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const lang = e.target.value;
+    i18n.changeLanguage(lang);
+  };
 
   return (
     <div className="app-layout">
       <div className="sidebar-container">
+        {/* Sidebarも内部で t() を使うべきですが、今回はApp.tsxのみの修正なのでProps等はそのまま */}
         <Sidebar 
           pdfDocument={pdfDocument} 
           pdfData={pdfData}         
@@ -504,26 +565,45 @@ function App() {
           style={{ 
             display: "flex", 
             alignItems: "center", 
-            justifyContent: "space-between", // 左右に離す
+            justifyContent: "space-between", 
             padding: "10px",
-            background: "#f0f0f0", // 背景色（お好みで）
+            background: "#f0f0f0", 
             borderBottom: "1px solid #ccc"
           }}
         >
           {/* 左側: ファイル名 */}
           <div style={{ fontWeight: "bold", fontSize: "16px", color: "#333" }}>
-            {pdfPath ? pdfPath : "ファイル未選択"}
-            {/* 変更がある場合に「*」を出すなどの工夫も可能です */}
+            {pdfPath ? pdfPath.split(/[/\\]/).pop() : t('ui.noFile')}
             {isDirty && <span style={{color: "red", marginLeft: "5px"}}>*</span>}
           </div>
 
-          {/* 右側: ボタン群 */}
+          {/* 右側: ボタン */}
           <div style={{ display: "flex", gap: "8px" }}>
-            <button onClick={handleOpenFile}>📂 開く</button>
-            <button onClick={handleSave} disabled={!pdfPath}>💾 保存</button>
-            <button onClick={handleSaveAs} disabled={!pdfPath}>💾 別名保存</button>
-            <button onClick={() => setScale(s => s + 0.2)}>🔍 拡大</button>
-            <button onClick={() => setScale(s => Math.max(0.4, s - 0.2))}>🔍 縮小</button>
+            
+
+            <button onClick={handleOpenFile}>{t('ui.open')}</button>
+            <button onClick={handleSave} disabled={!pdfPath}>{t('ui.save')}</button>
+            <button onClick={handleSaveAs} disabled={!pdfPath}>{t('ui.saveAs')}</button>
+            <button onClick={() => setScale(s => s + 0.2)}>{t('ui.zoomIn')}</button>
+            <button onClick={() => setScale(s => Math.max(0.4, s - 0.2))}>{t('ui.zoomOut')}</button>
+
+            <select
+              value={i18n.language} // 現在の言語を選択状態にする
+              onChange={handleLanguageChange}
+              style={{ 
+                padding: "5px", 
+                borderRadius: "4px", 
+                border: "1px solid #999",
+                cursor: "pointer",
+                marginRight: "8px" // 少し間隔を空ける
+              }}
+            >
+              {LANGUAGES.map((lang) => (
+                <option key={lang.code} value={lang.code}>
+                  {lang.label}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 
@@ -565,14 +645,13 @@ function App() {
                     onContextMenu={(e) => handleContextMenu(e, pageNumber)}
                     onClick={(e) => e.stopPropagation()} 
                   >
-                    {/* ▼▼▼ エラー回避のためにアノテーション層を無効化 ▼▼▼ */}
                     <Page 
                        pdf={pdfDocument}
                        pageNumber={pageNumber} 
                        scale={scale}
-                       renderAnnotationLayer={false} // 👈 必須！
-                       renderTextLayer={true} // テキスト選択用（重ければfalse）
-                       loading={<div style={{height: 1000 * scale, width: 700 * scale, background: "white"}}>Loading...</div>}
+                       renderAnnotationLayer={false}
+                       renderTextLayer={true}
+                       loading={<div style={{height: 1000 * scale, width: 700 * scale, background: "white"}}>{t('ui.loading')}</div>}
                     />
                     
                     {annotations
@@ -601,7 +680,7 @@ function App() {
               }}
             />
           ) : (
-            pdfData && <div style={{ color: "#fff", padding: "20px" }}>Loading PDF...</div>
+            pdfData && <div style={{ color: "#fff", padding: "20px" }}>{t('ui.loading')}</div>
           )}
         </div>
       </div>
@@ -625,7 +704,7 @@ function App() {
             onClick={executeAddAnnotation}
             style={{ padding: "8px 20px", cursor: "pointer", fontSize: "14px" }}
           >
-            ➕ アノテーションを追加
+            {t('ui.addAnnotation')}
           </div>
         </div>
       )}
