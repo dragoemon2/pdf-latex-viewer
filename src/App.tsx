@@ -288,13 +288,14 @@ function App() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.key === "Delete" || e.key === "Backspace") && selectedId !== null) {
-        if (document.activeElement === document.body) {
-           setAnnotations((prev) => prev.filter(a => a.id !== selectedId));
-           setSelectedId(null);
-           setIsDirty(true);
+        if ((e.key === "Delete" || e.key === "Backspace") && selectedId !== null) {
+          const activeTag = document.activeElement?.tagName.toLowerCase();
+          if (activeTag !== "input" && activeTag !== "textarea") {
+            setAnnotations((prev) => prev.filter(a => a.id !== selectedId));
+            setSelectedId(null);
+            setIsDirty(true);
+          }
         }
-      }
 
       if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
         e.preventDefault();
@@ -498,12 +499,32 @@ function App() {
       </div>
 
       <div className="main-content">
-        <div className="toolbar">
-          <button onClick={handleOpenFile}>📂 開く</button>
-          <button onClick={handleSave} disabled={!pdfPath}>💾 保存</button>
-          <button onClick={handleSaveAs} disabled={!pdfPath}>💾 別名保存</button>
-          <button onClick={() => setScale(s => s + 0.2)}>🔍 拡大</button>
-          <button onClick={() => setScale(s => Math.max(0.4, s - 0.2))}>🔍 縮小</button>
+        <div 
+          className="toolbar" 
+          style={{ 
+            display: "flex", 
+            alignItems: "center", 
+            justifyContent: "space-between", // 左右に離す
+            padding: "10px",
+            background: "#f0f0f0", // 背景色（お好みで）
+            borderBottom: "1px solid #ccc"
+          }}
+        >
+          {/* 左側: ファイル名 */}
+          <div style={{ fontWeight: "bold", fontSize: "16px", color: "#333" }}>
+            {pdfPath ? pdfPath : "ファイル未選択"}
+            {/* 変更がある場合に「*」を出すなどの工夫も可能です */}
+            {isDirty && <span style={{color: "red", marginLeft: "5px"}}>*</span>}
+          </div>
+
+          {/* 右側: ボタン群 */}
+          <div style={{ display: "flex", gap: "8px" }}>
+            <button onClick={handleOpenFile}>📂 開く</button>
+            <button onClick={handleSave} disabled={!pdfPath}>💾 保存</button>
+            <button onClick={handleSaveAs} disabled={!pdfPath}>💾 別名保存</button>
+            <button onClick={() => setScale(s => s + 0.2)}>🔍 拡大</button>
+            <button onClick={() => setScale(s => Math.max(0.4, s - 0.2))}>🔍 縮小</button>
+          </div>
         </div>
 
         <div 
@@ -526,6 +547,7 @@ function App() {
               ref={virtuosoRef}
               style={{ height: "100%", width: "100%" }}
               totalCount={numPages}
+              overscan={2000}
               itemContent={(index) => {
                 const pageNumber = index + 1;
                 return (
