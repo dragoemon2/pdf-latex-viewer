@@ -4,7 +4,12 @@
 
 ## Installation
 
-(Add installation instructions here)
+### Linux
+
+```bash
+wget https://github.com/dragoemon2/pdf-latex-viewer/releases/download/v0.1.0/pdf-latex-viewer_0.1.0_amd64.deb
+sudo apt install ./pdf-latex-viewer_0.1.0_amd64.deb
+```
 
 ## Features
 
