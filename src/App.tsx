@@ -2,52 +2,17 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { ask, open, save } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
-import renderMathInElement from "katex/dist/contrib/auto-render";
-import "katex/dist/katex.min.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Document, pdfjs } from "react-pdf";
+import { Document, Page } from "react-pdf";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
 import "./App.css";
-import Sidebar, { SearchResult, SidebarTab } from './components/Sidebar';
 
-const pdfOptions = {
-  cMapUrl: new URL('/cmaps/', window.location.origin).toString(),
-  cMapPacked: true,
-  standardFontDataUrl: new URL('/standard_fonts/', window.location.origin).toString(),
-};
-
-const LANGUAGES = [
-  { code: 'ja', label: '🇯🇵日本語' },
-  { code: 'en', label: '🇺🇸English' },
-  // { code: 'zh', label: '🇨🇳中文' }, 
-  // { code: 'de', label: '🇩🇪Deutsch' },
-];
-
-pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.min.mjs',
-  import.meta.url,
-).toString();
-
-console.log(`PDF.js Version: ${pdfjs.version}`);
-
-// const pdfOptions = {
-//   cMapUrl: new URL('/cmaps/', window.location.origin).toString(),
-//   cMapPacked: true,
-//   standardFontDataUrl: new URL('/standard_fonts/', window.location.origin).toString(),
-// };
-
-interface Annotation {
-  id: number;
-  page: number;
-  x: number;
-  y: number;
-  content: string;
-  isNew?: boolean;
-  fontSize?: number;
-}
+// 分割したコンポーネントをインポート
+import Sidebar from './components/Sidebar';
+import { Annotation, SearchResult, SidebarTab } from "./types";
 
 interface ContextMenuState {
   mouseX: number;
@@ -75,117 +40,6 @@ const base64ToBlob = (base64: string, type = "application/pdf") => {
   }
   return new Blob([bytes], { type });
 };
-
-const usePdfPageImage = (page: number, scale: number, pdfPath: string) => {
-  const [src, setSrc] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    (async () => {
-      const base64 = await invoke<string>("get_pdf_page_data", {
-        path: pdfPath,
-        pageNumber: page,
-        width: Math.floor(1200 * scale),
-      });
-
-      if (!cancelled) {
-        setSrc(`data:image/png;base64,${base64}`);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [page, scale, pdfPath]);
-
-  return src;
-};
-
-const PdfPage = ({
-  pageNumber,
-  scale,
-  annotations,
-  selectedId,
-  setSelectedId,
-  setDragState,
-  updateAnnotation,
-  pdfPath,
-  handleContextMenu
-}: any) => {
-  const src = usePdfPageImage(pageNumber, scale, pdfPath);
-  const imgRef = useRef<HTMLImageElement>(null);
-  const [size, setSize] = useState({ w: 1, h: 1 });
-
-  // 画像の実寸を取得（これが座標系）
-  const onLoad = () => {
-    if (imgRef.current) {
-      setSize({
-        w: imgRef.current.naturalWidth,
-        h: imgRef.current.naturalHeight,
-      });
-    }
-  };
-
-  return (
-    <div
-      style={{
-        position: "relative",
-        width: size.w * scale,
-        height: size.h * scale,
-        margin: "0 auto 20px auto",
-      }}
-      onContextMenu={(e) => handleContextMenu(e, pageNumber)}
-    >
-      {src && (
-        <img
-          ref={imgRef}
-          src={src}
-          onLoad={onLoad}
-          style={{
-            width: size.w * scale,
-            height: size.h * scale,
-            display: "block",
-          }}
-        />
-      )}
-
-      {/* Annotation Layer */}
-      <div
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          width: size.w * scale,
-          height: size.h * scale,
-          pointerEvents: "none",
-        }}
-      >
-        {annotations.map((ann: any) => (
-          <LatexAnnotation
-            key={ann.id}
-            data={ann}
-            scale={scale}
-            isSelected={selectedId === ann.id}
-            onUpdate={updateAnnotation}
-            onSelect={() => setSelectedId(ann.id)}
-            onMouseDown={(e: any) => {
-              setDragState({
-                id: ann.id,
-                startX: e.clientX,
-                startY: e.clientY,
-                initialAnnotX: ann.x,
-                initialAnnotY: ann.y,
-              });
-            }}
-          />
-        ))}
-      </div>
-    </div>
-  );
-};
-
-
 
 const LatexAnnotation = ({ 
   data, 
@@ -245,9 +99,8 @@ const LatexAnnotation = ({
         position: "absolute",
         left: data.x * scale,
         top: data.y * scale,
-        transform: `scale(${scale})`,
-        transformOrigin: "top left",
         zIndex: isSelected ? 20 : 10,
+        cursor: isEditing ? "text" : "move",
       }}
       onClick={(e) => {
         e.stopPropagation();
@@ -318,272 +171,118 @@ const LatexAnnotation = ({
 };
 
 function App() {
-  // 👇 翻訳フックを使用
   const { t, i18n } = useTranslation();
 
+  // State Management
   const [pdfPath, setPdfPath] = useState<string | null>(null);
-  const [pdfData, setPdfData] = useState<string | null>(null);
+  const [numPages, setNumPages] = useState<number>(0); 
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [scale, setScale] = useState(1.0);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
-  const [numPages, setNumPages] = useState<number>(0); 
   const [isDirty, setIsDirty] = useState(false);
-  const [pdfDocument, setPdfDocument] = useState<any>(null); 
-  const [searchText, setSearchText] = useState("");          
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);   
+  
+  // Sidebar State
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>("thumbs");
+  const [searchText, setSearchText] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
 
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const isDirtyRef = useRef(false);
-  const pdfUrlRef = useRef<string | null>(null);
 
-  // const pdfOptions = useMemo(() => ({
-  //   cMapUrl: new URL('/cmaps/', window.location.origin).toString(),
-  //   cMapPacked: true,
-  //   standardFontDataUrl: new URL('/standard_fonts/', window.location.origin).toString(),
-  // }), []); // 空の配列を渡すことで、アプリ起動時に1回だけ作成される
+  useEffect(() => { isDirtyRef.current = isDirty; }, [isDirty]);
 
-  useEffect(() => {
-    isDirtyRef.current = isDirty;
-  }, [isDirty]);
+  // Load Logic
+  const loadPdfFromPath = async (path: string) => {
+    try {
+      setPdfPath(path);
+      setAnnotations([]);
+      setNumPages(0);
+      const count = await invoke<number>("get_pdf_page_count", { path });
+      setNumPages(count);
+      virtuosoRef.current?.scrollToIndex({ index: 0 });
 
-  // 初期化ロード
-  useEffect(() => {
-    const checkStartupFile = async () => {
       try {
-        const path = await invoke<string | null>("get_startup_file");
-        if (path) {
-          setNumPages(0); 
-          setAnnotations([]);
-          setPdfPath(path);
-          setPdfDocument(null);
+        const loadedAnnots = await invoke<Annotation[]>("load_annotations", { path });
+        const formatted = loadedAnnots.map((a, i) => ({...a, id: Date.now() + i}));
+        setAnnotations(formatted);
+      } catch { setAnnotations([]); }
+    } catch (e) { console.error("Failed to load PDF:", e); }
+  };
 
-          const base64 = await invoke<string>("open_pdf_file", { path });
-          
-          if (pdfUrlRef.current) {
-             URL.revokeObjectURL(pdfUrlRef.current);
-          }
-          const blob = base64ToBlob(base64);
-          const url = URL.createObjectURL(blob);
-          pdfUrlRef.current = url;
-          setPdfData(url);
-
-          try {
-             const loadedAnnots = await invoke<Annotation[]>("load_annotations", { path });
-             const formatted = loadedAnnots.map((a, i) => ({...a, id: Date.now() + i}));
-             setAnnotations(formatted);
-          } catch (e) {
-             setAnnotations([]);
-          }
-        }
-      } catch (e) {
-        console.error("Failed to check startup file", e);
-      }
-    };
-    checkStartupFile();
+  // Initial Load
+  useEffect(() => {
+    invoke<string | null>("get_startup_file").then(path => {
+      if (path) loadPdfFromPath(path);
+    });
   }, []);
 
-  const onDocumentLoadSuccess = (pdf: any) => {
-    setNumPages(pdf.numPages);
-    setPdfDocument(pdf);
-    setSearchResults([]);
-    setSearchText("");
-  };
-
-  const handleOpenFile = async () => {
-    if (isDirty) {
-      const confirmed = await ask(t('dialog.unsavedChanges'), {
-        title: t('dialog.warning'),
-        kind: 'warning',
-        okLabel: t('dialog.discardAndOpen'),
-        cancelLabel: t('dialog.cancel'),
-      });
-      if (!confirmed) return;
-    }
-
-    try {
-      const selectedPath = await open({
-        multiple: false,
-        filters: [{ name: 'PDF', extensions: ['pdf'] }],
-      });
-      if (selectedPath && typeof selectedPath === 'string') {
-        setNumPages(0);
-        setAnnotations([]);
-        setPdfPath(selectedPath);
-        setPdfDocument(null); 
-        
-        setPdfData(null);
-        
-        const base64 = await invoke<string>("open_pdf_file", { path: selectedPath });
-
-        if (pdfUrlRef.current) {
-          URL.revokeObjectURL(pdfUrlRef.current);
-          pdfUrlRef.current = null;
-        }
-
-        const blob = base64ToBlob(base64);
-        const url = URL.createObjectURL(blob);
-        pdfUrlRef.current = url;
-        setPdfData(url);
-
-        virtuosoRef.current?.scrollToIndex({ index: 0 });
-
-        try {
-           const loadedAnnots = await invoke<Annotation[]>("load_annotations", { path: selectedPath });
-           const formatted = loadedAnnots.map((a, i) => ({...a, id: Date.now() + i}));
-           setAnnotations(formatted);
-        } catch (e) {
-           setAnnotations([]);
-        }
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
+  // Window Title
   useEffect(() => {
-    const updateTitle = async () => {
-      try {
-        const appWindow = getCurrentWindow();
-        if (pdfPath) {
-          const fileName = pdfPath.split(/[/\\]/).pop() || "PDF Viewer";
-          await appWindow.setTitle(fileName);
-        } else {
-          await appWindow.setTitle("PDF Latex Viewer");
-        }
-      } catch (e) {
-        console.error(e);
-      }
-    };
-    updateTitle();
+    const title = pdfPath ? pdfPath.split(/[/\\]/).pop() : "PDF Viewer";
+    getCurrentWindow().setTitle(title || "PDF Viewer");
   }, [pdfPath]);
+
+  // Actions
+  const handleOpenFile = async () => {
+    if (isDirty && !await ask(t('dialog.unsavedChanges'), { title: t('dialog.warning'), kind: 'warning' })) return;
+    const selected = await open({ multiple: false, filters: [{ name: 'PDF', extensions: ['pdf'] }] });
+    if (typeof selected === 'string') await loadPdfFromPath(selected);
+  };
 
   const handleSave = useCallback(async () => {
     if (!pdfPath) return;
     try {
-      await invoke("save_pdf_with_annotations", { 
-        path: pdfPath, 
-        annotations: annotations 
-      });
+      await invoke("save_pdf_with_annotations", { path: pdfPath, annotations });
       setIsDirty(false);
-      // alert(t('dialog.saveSuccess')); // 必要ならコメントアウト解除
-    } catch (e) {
-      alert(t('dialog.saveFailed'));
-    }
+    } catch { alert(t('dialog.saveFailed')); }
   }, [pdfPath, annotations, t]);
 
   const handleSaveAs = useCallback(async () => {
     try {
-      const newPath = await save({
-        filters: [{ name: 'PDF', extensions: ['pdf'] }],
-        defaultPath: 'annotated.pdf'
-      });
+      const newPath = await save({ filters: [{ name: 'PDF', extensions: ['pdf'] }], defaultPath: 'annotated.pdf' });
       if (newPath) {
-        await invoke("save_pdf_with_annotations", { 
-          path: newPath, 
-          annotations: annotations 
-        });
+        await invoke("save_pdf_with_annotations", { path: newPath, annotations });
         setPdfPath(newPath); 
         alert(`${t('dialog.saveSuccess')}\n${newPath}`);
       }
-    } catch (e) {
-      alert(t('dialog.saveCancelled'));
-    }
+    } catch { alert(t('dialog.saveCancelled')); }
   }, [annotations, t]);
 
-
+  // Keyboard Events
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-        if ((e.key === "Delete" || e.key === "Backspace") && selectedId !== null) {
-          const activeTag = document.activeElement?.tagName.toLowerCase();
-          if (activeTag !== "input" && activeTag !== "textarea") {
-            setAnnotations((prev) => prev.filter(a => a.id !== selectedId));
-            setSelectedId(null);
-            setIsDirty(true);
-          }
-        }
-
-      if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
-        e.preventDefault();
-        if (e.shiftKey) {
-          handleSaveAs();
-        } else {
-          if (pdfPath) handleSave(); else handleSaveAs();
-        }
-      }
-
-      if ((e.ctrlKey || e.metaKey) && (e.key === '+' || e.key === '=' || e.key === ';')) {
-        e.preventDefault();
-        if (selectedId !== null) {
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedId !== null) {
+        if (!["input", "textarea"].includes(document.activeElement?.tagName.toLowerCase() || "")) {
+          setAnnotations(prev => prev.filter(a => a.id !== selectedId));
+          setSelectedId(null);
           setIsDirty(true);
-          setAnnotations(prev => prev.map(a => {
-            if (a.id === selectedId) return { ...a, fontSize: (a.fontSize || 20) + 2 };
-            return a;
-          }));
-        } else {
-          setScale(s => parseFloat((s + 0.2).toFixed(1)));
         }
       }
-
-      if ((e.ctrlKey || e.metaKey) && e.key === '-') {
-        e.preventDefault();
-        if (selectedId !== null) {
-          setIsDirty(true);
-          setAnnotations(prev => prev.map(a => {
-            if (a.id === selectedId) return { ...a, fontSize: Math.max(10, (a.fontSize || 20) - 2) };
-            return a;
-          }));
-        } else {
-          setScale(s => Math.max(0.4, parseFloat((s - 0.2).toFixed(1))));
-        }
+      if ((e.ctrlKey || e.metaKey)) {
+        if (e.key === 's') { e.preventDefault(); e.shiftKey ? handleSaveAs() : (pdfPath ? handleSave() : handleSaveAs()); }
+        if (e.key === '+' || e.key === '=') { e.preventDefault(); setScale(s => s + 0.2); }
+        if (e.key === '-') { e.preventDefault(); setScale(s => Math.max(0.4, s - 0.2)); }
+        if (e.key === 'p') { e.preventDefault(); if(pdfPath) openPath(pdfPath); }
+        if (e.key === 'o') { e.preventDefault(); handleOpenFile(); }
       }
-
-      if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) {
-        e.preventDefault();
-        if (pdfPath) openPath(pdfPath).catch(console.error);
-      }
-
-      if ((e.ctrlKey || e.metaKey) && (e.key === 'o' || e.key === 'O')) {
-        e.preventDefault();
-        handleOpenFile();
-      }
-
-      if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) {
-        e.preventDefault();
-        setSidebarTab("search");
-      }
-
-      if (e.key === "Escape") {
-        setContextMenu(null);
-        setSelectedId(null);}
+      if (e.key === "Escape") { setContextMenu(null); setSelectedId(null); }
     };
-
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedId, pdfPath, handleSave, handleSaveAs, handleOpenFile]);
+  }, [selectedId, pdfPath, handleSave, handleSaveAs]);
 
+  // Drag Logic
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!dragState) return;
       const deltaX = (e.clientX - dragState.startX) / scale;
       const deltaY = (e.clientY - dragState.startY) / scale;
-      setAnnotations((prev) => prev.map(a => {
-        if (a.id === dragState.id) {
-          return {
-            ...a,
-            x: dragState.initialAnnotX + deltaX,
-            y: dragState.initialAnnotY + deltaY
-          };
-        }
-        return a;
-      }));
+      setAnnotations(prev => prev.map(a => a.id === dragState.id ? 
+        { ...a, x: dragState.initialAnnotX + deltaX, y: dragState.initialAnnotY + deltaY } : a));
     };
-    const handleMouseUp = () => {
-      setDragState(null);
-      setIsDirty(true);
-    };
+    const handleMouseUp = () => { if (dragState) { setDragState(null); setIsDirty(true); } };
     if (dragState) {
       window.addEventListener("mousemove", handleMouseMove);
       window.addEventListener("mouseup", handleMouseUp);
@@ -594,27 +293,24 @@ function App() {
     };
   }, [dragState, scale]);
 
-  const handleContextMenu = (e: React.MouseEvent, pageNumber: number) => {
+  // Handlers for Child Components
+  const handleContextMenu = (e: React.MouseEvent, page: number) => {
     e.preventDefault();
     const rect = e.currentTarget.getBoundingClientRect();
     setContextMenu({
-      mouseX: e.clientX,
-      mouseY: e.clientY,
+      mouseX: e.clientX, mouseY: e.clientY,
       pdfX: (e.clientX - rect.left) / scale,
       pdfY: (e.clientY - rect.top) / scale,
-      page: pageNumber 
+      page
     });
   };
 
-  const executeAddAnnotation = () => {
+  const handleAddAnnotation = () => {
     if (!contextMenu) return;
     const newAnnot: Annotation = {
-      id: Date.now(),
-      page: contextMenu.page,
-      x: contextMenu.pdfX, 
-      y: contextMenu.pdfY, 
-      content: "",
-      isNew: true
+      id: Date.now(), page: contextMenu.page,
+      x: contextMenu.pdfX, y: contextMenu.pdfY,
+      content: "", isNew: true
     };
     setAnnotations([...annotations, newAnnot]);
     setIsDirty(true);
@@ -622,107 +318,25 @@ function App() {
     setContextMenu(null);
   };
 
-  const handleBackgroundClick = () => {
-    setSelectedId(null);
-    setContextMenu(null);
-  };
-
-  const updateAnnotation = (id: number, newText: string) => {
-    setAnnotations(annotations.map(a => a.id === id ? { ...a, content: newText, isNew: false } : a));
+  const updateAnnotation = (id: number, text: string) => {
+    setAnnotations(prev => prev.map(a => a.id === id ? { ...a, content: text, isNew: false } : a));
     setIsDirty(true);
-  };
-
-  const handleJumpToPage = (pageNumber: number) => {
-    virtuosoRef.current?.scrollToIndex({
-      index: pageNumber - 1, 
-      align: 'start'
-    });
-  };
-
-  const handleSearch = async (query: string) => {
-    setSearchText(query);
-    if (!query || !pdfDocument) {
-      setSearchResults([]);
-      return;
-    }
-    const results: SearchResult[] = [];
-    const lowerQuery = query.toLowerCase();
-
-    for (let i = 1; i <= pdfDocument.numPages; i++) {
-      const page = await pdfDocument.getPage(i);
-      const textContent = await page.getTextContent();
-      const fullText = textContent.items.map((item: any) => item.str).join("");
-      const lowerFullText = fullText.toLowerCase();
-
-      let startIndex = 0;
-      let matchIndex = 0;
-      while (true) {
-        const index = lowerFullText.indexOf(lowerQuery, startIndex);
-        if (index === -1) break;
-        const startContext = Math.max(0, index - 20);
-        const endContext = Math.min(fullText.length, index + query.length + 20);
-        const contextStr = fullText.slice(startContext, endContext);
-        results.push({ page: i, matchIndex: matchIndex, context: contextStr });
-        startIndex = index + query.length;
-        matchIndex++;
-      }
-    }
-    setSearchResults(results);
-  };
-
-  useEffect(() => {
-    const appWindow = getCurrentWindow();
-    const unlistenPromise = appWindow.onCloseRequested(async (event) => {
-      if (isDirtyRef.current) {
-        event.preventDefault();
-        const confirmed = await ask(t('dialog.unsavedChangesClose'), {
-          title: t('dialog.confirmClose'),
-          kind: 'warning',
-          okLabel: t('dialog.close'),
-          cancelLabel: t('dialog.cancel'),
-        });
-        if (confirmed) {
-          isDirtyRef.current = false;
-          setIsDirty(false); 
-          await appWindow.close();
-        }
-      }
-    });
-    return () => { unlistenPromise.then(unlisten => unlisten()); };
-  }, [t]);
-
-  // アプリ終了時の掃除
-  useEffect(() => {
-    return () => {
-      if (pdfUrlRef.current) {
-        URL.revokeObjectURL(pdfUrlRef.current);
-      }
-    };
-  }, []);
-
-  // 言語切り替え関数
-  const handleLanguageChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const lang = e.target.value;
-    i18n.changeLanguage(lang);
   };
 
   return (
     <div className="app-layout" onMouseDown={() => setContextMenu(null)}>
       <div className="sidebar-container">
-        {/* Sidebarも内部で t() を使うべきですが、今回はApp.tsxのみの修正なのでProps等はそのまま */}
         <Sidebar 
-          pdfDocument={pdfDocument} 
-          pdfData={pdfData}         
+          pdfPath={pdfPath}
           numPages={numPages}
           annotations={annotations}
-          onJumpToPage={handleJumpToPage}
-          pdfOptions={pdfOptions}
-          searchText={searchText}
-          onSearchChange={handleSearch}
-          searchResults={searchResults}
-          onResultClick={(res) => handleJumpToPage(res.page)}
+          onJumpToPage={(p) => virtuosoRef.current?.scrollToIndex({ index: p - 1, align: 'start' })}
           activeTab={sidebarTab}
           onTabChange={setSidebarTab}
+          // Search params (placeholder)
+          searchText={searchText} onSearchChange={setSearchText}
+          searchResults={searchResults} onResultClick={() => {}}
+          pdfFile={null} pdfDocument={null} pdfOptions={null}
         />
       </div>
 
@@ -799,18 +413,54 @@ function App() {
               itemContent={(index) => {
                 const pageNumber = index + 1;
                 return (
-                  <PdfPage
+                  <div 
                     key={pageNumber}
-                    pageNumber={pageNumber}
-                    scale={scale}
-                    annotations={annotations.filter(a => a.page === pageNumber)}
-                    selectedId={selectedId}
-                    setSelectedId={setSelectedId}
-                    setDragState={setDragState}
-                    updateAnnotation={updateAnnotation}
-                    pdfPath={pdfPath!}
-                    handleContextMenu={handleContextMenu}
-                  />
+                    id={`page-${pageNumber}`} 
+                    className="pdf-page-container"
+                    style={{ 
+                      position: "relative", 
+                      marginBottom: "20px", 
+                      border: "1px solid #999",
+                      width: "fit-content", 
+                      margin: "0 auto 20px auto" 
+                    }}
+                    onContextMenu={(e) => handleContextMenu(e, pageNumber)}
+                    onClick={(e) => e.stopPropagation()} 
+                  >
+                    <Page 
+                       pdf={pdfDocument}
+                       pageNumber={pageNumber} 
+                       scale={scale}
+                       renderAnnotationLayer={false}
+                       renderTextLayer={false}
+                       devicePixelRatio={1} // 画質を制限して負荷を下げる
+                       renderMode="canvas"
+                       loading={<div style={{height: 1000 * scale, width: 700 * scale, background: "white"}}>{t('ui.loading')}</div>}
+                       onRenderError={(e) => console.error("Render Error:", e)}
+                    />
+                    
+                    {annotations
+                      .filter(ann => ann.page === pageNumber)
+                      .map((ann) => (
+                        <LatexAnnotation 
+                          key={ann.id} 
+                          data={ann} 
+                          scale={scale}
+                          isSelected={selectedId === ann.id}
+                          onUpdate={updateAnnotation}
+                          onSelect={() => setSelectedId(ann.id)}
+                          onMouseDown={(e) => {
+                            setDragState({
+                              id: ann.id,
+                              startX: e.clientX,
+                              startY: e.clientY,
+                              initialAnnotX: ann.x,
+                              initialAnnotY: ann.y
+                            });
+                          }}
+                        />
+                    ))}
+                  </div>
                 );
               }}
             />
@@ -823,23 +473,13 @@ function App() {
       {contextMenu && (
         <div
           style={{
-            position: "fixed",
-            top: contextMenu.mouseY,
-            left: contextMenu.mouseX,
-            background: "white",
-            border: "1px solid #ccc",
-            boxShadow: "2px 2px 5px rgba(0,0,0,0.2)",
-            zIndex: 1000,
-            padding: "5px 0",
-            borderRadius: "4px"
+            position: "fixed", top: contextMenu.mouseY, left: contextMenu.mouseX,
+            background: "white", border: "1px solid #ccc", zIndex: 1000,
+            padding: "5px 0", borderRadius: "4px", boxShadow: "2px 2px 5px rgba(0,0,0,0.2)"
           }}
-          onClick={(e) => e.stopPropagation()}
-          onMouseDown={(e) => e.stopPropagation()}
+          onMouseDown={e => e.stopPropagation()}
         >
-          <div 
-            onClick={executeAddAnnotation}
-            style={{ padding: "8px 20px", cursor: "pointer", fontSize: "14px" }}
-          >
+          <div onClick={handleAddAnnotation} style={{ padding: "8px 20px", cursor: "pointer" }}>
             {t('ui.addAnnotation')}
           </div>
         </div>

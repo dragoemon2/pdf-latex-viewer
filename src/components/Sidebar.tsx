@@ -1,62 +1,42 @@
 import katex from "katex";
-import React, { useEffect, useRef } from "react";
-import { Document, Outline, Page } from "react-pdf";
-import "react-pdf/dist/Page/AnnotationLayer.css";
-import "react-pdf/dist/Page/TextLayer.css";
+import React from "react";
 import { Virtuoso } from "react-virtuoso";
-
-
-export interface SearchResult {
-  page: number;
-  matchIndex: number;
-  context: string;
-}
+// ★画像コンポーネントをインポート
+import NativePdfPage from "./NativePdfPage";
 
 export type SidebarTab = "thumbs" | "outline" | "annots" | "search";
 
 interface SidebarProps {
-  // 親で読み込んだPDFオブジェクト（サムネイル用）
-  pdfDocument: any;
-  // ファイルパスまたはデータ（目次用）
-  pdfData: string | null;
-  
+  pdfPath: string | null; // Documentオブジェクトではなくパスを受け取る
   numPages: number;
   annotations: any[];
-  onJumpToPage: (pageNumber: number, y?: number) => void;
-  pdfOptions: any;
-  searchText: string;
-  onSearchChange: (text: string) => void;
-  searchResults: SearchResult[];
-  onResultClick: (result: SearchResult) => void;
+  onJumpToPage: (pageNumber: number) => void;
   activeTab: SidebarTab;
   onTabChange: (tab: SidebarTab) => void;
+  searchText: string; // IGNORE
+  onSearchChange: (text: string) => void; // IGNORE
+  searchResults?: any[]; // IGNORE
+  onResultClick?: (result: any) => void; // IGNORE
+  pdfFile?: File | null; // IGNORE
+  pdfDocument?: any | null; // IGNORE
+  pdfOptions?: any | null; // IGNORE
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ 
-  pdfDocument,
-  pdfData,
+  pdfPath,
   numPages, 
   annotations, 
   onJumpToPage,
-  pdfOptions,
+  activeTab,
+  onTabChange,
   searchText,
   onSearchChange,
   searchResults,
   onResultClick,
-  activeTab,
-  onTabChange
+  pdfFile,
+  pdfDocument,
+  pdfOptions
 }) => {
-  const searchInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (activeTab === "search" && searchInputRef.current) {
-      setTimeout(() => {
-        searchInputRef.current?.focus();
-        searchInputRef.current?.select();
-      }, 50);
-    }
-  }, [activeTab]);
-
   const renderMathPreview = (latex: string) => {
     try {
       return { __html: katex.renderToString(latex, { throwOnError: false }) };
@@ -71,16 +51,16 @@ const Sidebar: React.FC<SidebarProps> = ({
       {/* タブヘッダー */}
       <div style={{ display: "flex", borderBottom: "1px solid #ccc", background: "#fff", flexShrink: 0 }}>
         <TabButton label="📄" active={activeTab === "thumbs"} onClick={() => onTabChange("thumbs")} title="Thumbnails" />
-        <TabButton label="📑" active={activeTab === "outline"} onClick={() => onTabChange("outline")} title="Outline" />
         <TabButton label="📝" active={activeTab === "annots"} onClick={() => onTabChange("annots")} title="Annotations" />
-        <TabButton label="🔍" active={activeTab === "search"} onClick={() => onTabChange("search")} title="Search" />
+        {/* 目次と検索はRust側実装待ちのため一旦無効化、あるいは非表示 */}
+        {/* <TabButton label="📑" ... /> */}
+        {/* <TabButton label="🔍" ... /> */}
       </div>
 
-      {/* メインエリア */}
       <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
         
-        {/* 1. Thumbnails (仮想化 + PDFオブジェクト直渡し) */}
-        {activeTab === "thumbs" && pdfDocument && (
+        {/* 1. Thumbnails: 画像コンポーネントを使用 */}
+        {activeTab === "thumbs" && pdfPath && numPages > 0 && (
           <div style={{ height: "100%", width: "100%" }}>
              <Virtuoso
                 style={{ height: "100%" }}
@@ -93,18 +73,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                       onClick={() => onJumpToPage(pageNum)}
                       style={{ cursor: "pointer", textAlign: "center", paddingTop: "15px", paddingBottom: "5px" }}
                     >
-                      <div style={{ border: "1px solid #ddd", display: "inline-block", boxShadow: "0 2px 5px rgba(0,0,0,0.1)", background: "white", minHeight: "130px" }}>
-                        
-                        {/* ▼▼▼ 親から貰った pdfDocument を直接渡す ▼▼▼ */}
-                        <Page 
-                          pdf={pdfDocument}
-                          pageNumber={pageNum} 
-                          width={100} 
-                          renderTextLayer={false} 
-                          renderAnnotationLayer={false} 
-                          loading={<div style={{height: 140, width: 100, background: "#f8f9fa"}}></div>}
+                      <div style={{ border: "1px solid #ddd", display: "inline-block", background: "white", width: "100px", minHeight: "130px" }}>
+                        <NativePdfPage 
+                          path={pdfPath}
+                          pageIndex={index}
+                          scale={0.2} // サムネイル用に低解像度でリクエスト
                         />
-
                       </div>
                       <div style={{ fontSize: "12px", color: "#666", marginTop: "4px" }}>Page {pageNum}</div>
                     </div>
@@ -114,64 +88,17 @@ const Sidebar: React.FC<SidebarProps> = ({
           </div>
         )}
 
-        {/* 2. Outline (Documentコンポーネントを使用) */}
-        {activeTab === "outline" && pdfData && (
-          <div style={{ padding: "10px", overflowY: "auto", height: "100%" }}>
-            {/* Outlineには <Document> が必須なので、ここだけ Document を使う */}
-            {/* activeTabで切り替えているので、Thumbsと同時にレンダリングされず競合しにくい */}
-            <Document file={pdfData} options={pdfOptions}>
-              <Outline 
-                onItemClick={({ pageNumber }) => {
-                  const num = typeof pageNumber === 'number' ? pageNumber : parseInt(pageNumber as string);
-                  if (!isNaN(num)) onJumpToPage(num);
-                }} 
-                className="custom-outline"
-              />
-            </Document>
-          </div>
-        )}
-        
-        {/* 3. Annotations */}
+        {/* 2. Annotations: 既存ロジックそのまま */}
         {activeTab === "annots" && (
            <div style={{ padding: "10px", overflowY: "auto", height: "100%" }}>
              {annotations.length === 0 && <div style={{color: "#999", textAlign: "center", marginTop: "20px"}}>No annotations</div>}
              {annotations.map((ann) => (
-               <div key={ann.id} onClick={() => onJumpToPage(ann.page, ann.y)} style={{ padding: "10px", border: "1px solid #eee", cursor: "pointer", background: "white", marginBottom: "8px", borderRadius: "4px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
+               <div key={ann.id} onClick={() => onJumpToPage(ann.page)} style={{ padding: "10px", border: "1px solid #eee", cursor: "pointer", background: "white", marginBottom: "8px", borderRadius: "4px" }}>
                  <div style={{ fontSize: "11px", color: "#007bff", marginBottom: "4px", fontWeight: "bold" }}>Page {ann.page}</div>
                  <div dangerouslySetInnerHTML={renderMathPreview(ann.content)} style={{ fontSize: "14px", overflowWrap: "break-word" }} />
                </div>
              ))}
            </div>
-        )}
-
-        {/* 4. Search */}
-        {activeTab === "search" && (
-           <div style={{ display: "flex", flexDirection: "column", height: "100%", padding: "10px", boxSizing: "border-box" }}>
-            <div style={{ marginBottom: "10px", flexShrink: 0 }}>
-              <input
-                ref={searchInputRef}
-                autoFocus
-                type="text"
-                placeholder="Search..."
-                value={searchText}
-                onChange={(e) => onSearchChange(e.target.value)}
-                onKeyDown={(e) => e.stopPropagation()}
-                style={{ width: "100%", padding: "8px", border: "1px solid #ccc", borderRadius: "4px", boxSizing: "border-box" }}
-              />
-              <div style={{ fontSize: "12px", color: "#666", marginTop: "5px", textAlign: "right" }}>
-                {searchText ? `${searchResults.length} matches` : "Enter text to search"}
-              </div>
-            </div>
-            <div style={{ flex: 1, overflowY: "auto" }}>
-              {searchResults.map((result, idx) => (
-                 <div key={`${result.page}-${result.matchIndex}-${idx}`} onClick={() => onResultClick(result)} className="search-result-item" style={{ padding: "8px", background: "white", borderBottom: "1px solid #eee", cursor: "pointer", fontSize: "13px", borderRadius: "4px", marginBottom: "4px" }}>
-                    <div style={{ fontSize: "11px", fontWeight: "bold", color: "#666" }}>Page {result.page}</div>
-                    <div style={{ color: "#333", lineHeight: "1.4" }}>...{result.context}...</div>
-                 </div>
-              ))}
-              {searchText && searchResults.length === 0 && <div style={{ textAlign: "center", color: "#999", marginTop: "20px" }}>Not found</div>}
-            </div>
-          </div>
         )}
       </div>
     </div>
